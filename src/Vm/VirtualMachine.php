@@ -2033,6 +2033,14 @@ final class VirtualMachine
         if ($value instanceof JsRegex) {
             return $value->__toString();
         }
+        // Honour __toString for any object that defines one — covers
+        // PhpObjectProxy targets that implement Stringable, native PHP
+        // value-objects, etc. Without this fallback every wrapped PHP
+        // object stringifies to '[object Object]' in template literals
+        // and + concat, hiding meaningful values.
+        if (is_object($value) && method_exists($value, '__toString')) {
+            return (string) $value;
+        }
         return '[object Object]';
     }
 

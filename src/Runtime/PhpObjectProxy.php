@@ -38,6 +38,22 @@ final class PhpObjectProxy implements \ArrayAccess
         public readonly object $target,
     ) {}
 
+    /**
+     * Stringification proxy: when the wrapped target implements
+     * `__toString`, surface that value at the proxy level so JS-side
+     * primitive coercion (template literals, `+` concat, `Ops::toString`)
+     * unwraps to the meaningful string instead of returning
+     * `'[object Object]'`. Targets without `__toString` fall back to
+     * the proxy's class name in brackets, mirroring JS conventions.
+     */
+    public function __toString(): string
+    {
+        if (method_exists($this->target, '__toString')) {
+            return (string) $this->target;
+        }
+        return '[object ' . $this->target::class . ']';
+    }
+
     // ── VM integration ──
 
     public function get(string $key): mixed
@@ -56,6 +72,19 @@ final class PhpObjectProxy implements \ArrayAccess
 
         if (property_exists($this->target, $key)) {
             return self::wrapForVm($this->target->$key);
+        }
+
+        // Fall back to the target's `__get` magic method when present.
+        // PHP's property_exists() doesn't see __get-served properties,
+        // so without this branch any class that exposes its state
+        // exclusively through __get (e.g. an ORM record with field
+        // wrappers) is invisible to the JS sandbox.
+        if (method_exists($this->target, '__get')) {
+            try {
+                return self::wrapForVm($this->target->__get($key));
+            } catch (\Throwable) {
+                // __get throwing means "no such property" — treat as undefined.
+            }
         }
 
         return JsUndefined::Value;
